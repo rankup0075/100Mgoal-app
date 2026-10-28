@@ -73,7 +73,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private const val PAGE = 5
+private const val PAGE = 3
 
 private sealed interface Sheet {
     data object Add : Sheet
@@ -242,7 +242,7 @@ private fun Card(title: String, action: String? = null, onAction: () -> Unit = {
     }
 }
 
-/** Shows 5 more each tap; once everything is shown it collapses back to 5. Hidden when there are 5 or fewer. */
+/** Shows [PAGE] more each tap; once everything is shown it collapses back to [PAGE]. Hidden when there are [PAGE] or fewer. */
 @Composable
 private fun MoreButton(total: Int, shown: Int, onChange: (Int) -> Unit) {
     if (total <= PAGE) return
