@@ -1,6 +1,10 @@
 package com.rangseung.goal100m
 
+import android.content.ClipboardManager
 import android.os.Bundle
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.AlertDialog
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -82,6 +86,9 @@ private sealed interface Sheet {
     data object AllFixed : Sheet
     data object AllEntries : Sheet
     data class Day(val date: String) : Sheet
+    data class EditEntry(val e: Entry) : Sheet
+    data object Search : Sheet
+    data object Backup : Sheet
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -102,6 +109,9 @@ private fun MainScreen() {
     fun toast(m: String) = Toast.makeText(ctx, m, Toast.LENGTH_SHORT).show()
     val toggle: (String) -> Unit = { openId = if (openId == it) null else it }
     val delete: (String) -> Unit = { Store.deleteEntry(ctx, it); openId = null; toast("삭제했어") }
+    val edit: (Entry) -> Unit = { openId = null; sheet = Sheet.EditEntry(it) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var queryType by rememberSaveable { mutableStateOf("all") }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -127,9 +137,12 @@ private fun MainScreen() {
                         Text("가계부", fontSize = 24.sp, fontWeight = FontWeight.Black)
                         Text("이 폰에만 저장 · 광고 없음", fontSize = 12.sp, color = muted)
                     }
-                    OutlinedButton({ catsFor = OUT }, shape = RoundedCornerShape(10.dp)) { Text("카테고리", fontSize = 13.sp) }
-                    Spacer(Modifier.width(6.dp))
-                    OutlinedButton({ sheet = Sheet.Goal }, shape = RoundedCornerShape(10.dp)) { Text("목표", fontSize = 13.sp) }
+                    val pad = PaddingValues(horizontal = 10.dp)
+                    OutlinedButton({ catsFor = OUT }, shape = RoundedCornerShape(10.dp), contentPadding = pad) { Text("카테고리", fontSize = 13.sp) }
+                    Spacer(Modifier.width(4.dp))
+                    OutlinedButton({ sheet = Sheet.Goal }, shape = RoundedCornerShape(10.dp), contentPadding = pad) { Text("목표", fontSize = 13.sp) }
+                    Spacer(Modifier.width(4.dp))
+                    OutlinedButton({ sheet = Sheet.Backup }, shape = RoundedCornerShape(10.dp), contentPadding = pad) { Text("백업", fontSize = 13.sp) }
                 }
             }
             item { GoalCard(data) }
@@ -170,11 +183,15 @@ private fun MainScreen() {
                     }
                 }
             }
+            item { ReportCard(data, ym) }
             item {
-                Card("내역", action = if (monthEntries.isNotEmpty()) "전체보기" else null, onAction = { sheet = Sheet.AllEntries }) {
+                Card(
+                    "내역", action = if (monthEntries.isNotEmpty()) "전체보기" else null, onAction = { sheet = Sheet.AllEntries },
+                    action2 = "검색", onAction2 = { openId = null; sheet = Sheet.Search },
+                ) {
                     if (monthEntries.isEmpty()) Text("이번 달 기록이 없어.\n아래 + 기록하기로 첫 기록을 남겨봐.", color = muted, fontSize = 14.sp,
                         modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                    EntryRows(data, monthEntries.take(entriesShown), openId, toggle, delete)
+                    EntryRows(data, monthEntries.take(entriesShown), openId, toggle, delete, edit)
                     MoreButton(monthEntries.size, entriesShown) { entriesShown = it }
                 }
             }
@@ -204,9 +221,16 @@ private fun MainScreen() {
                 Sheet.AllEntries -> {
                     val m = java.time.YearMonth.parse(ym)
                     SheetList("${m.monthValue}월 내역 전체 (${monthEntries.size})", "수입 ${Calc.fmt(sum.inc)} · 지출 ${Calc.fmt(sum.out)} · 저축 ${Calc.fmt(sum.save)}") {
-                        EntryRows(data, monthEntries, openId, toggle, delete)
+                        EntryRows(data, monthEntries, openId, toggle, delete, edit)
                     }
                 }
+                is Sheet.EditEntry -> AddEntryForm(
+                    initialType = s.e.t, defaultDate = s.e.d, editing = s.e,
+                    onSaved = { e -> sheet = null; toast("${e.cat} ${Calc.fmt(e.amt)}원으로 수정했어") },
+                    onClose = { sheet = null },
+                )
+                Sheet.Search -> SearchSheet(data, query, { query = it }, queryType, { queryType = it }, openId, toggle, delete, edit)
+                Sheet.Backup -> BackupSheet { msg -> sheet = null; toast(msg) }
                 is Sheet.Day -> {
                     val list = data.entries.filter { it.d == s.date }.sortedByDescending { it.ts }
                     val dt = LocalDate.parse(s.date)
@@ -215,7 +239,7 @@ private fun MainScreen() {
                     val out = list.filter { it.t == OUT && !Calc.isSave(it, names) }.sumOf { it.amt }
                     SheetList("${dt.monthValue}월 ${dt.dayOfMonth}일 (${"월화수목금토일"[dt.dayOfWeek.value - 1]})", "수입 ${Calc.fmt(inc)} · 지출 ${Calc.fmt(out)}") {
                         if (list.isEmpty()) Text("이 날은 기록이 없어.", color = muted, fontSize = 14.sp, modifier = Modifier.padding(vertical = 16.dp))
-                        EntryRows(data, list, openId, toggle, delete, showDate = false)
+                        EntryRows(data, list, openId, toggle, delete, edit, showDate = false)
                     }
                 }
             }
@@ -226,16 +250,21 @@ private fun MainScreen() {
 
 // ---------- cards ----------
 @Composable
-private fun Card(title: String, action: String? = null, onAction: () -> Unit = {}, content: @Composable ColumnScope.() -> Unit) {
+private fun Card(
+    title: String, action: String? = null, onAction: () -> Unit = {},
+    action2: String? = null, onAction2: () -> Unit = {}, content: @Composable ColumnScope.() -> Unit,
+) {
     Surface(shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = muted, modifier = Modifier.weight(1f),
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (action != null) Text(
-                    action, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onAction).padding(horizontal = 6.dp, vertical = 2.dp),
-                )
+                listOfNotNull(action2?.let { it to onAction2 }, action?.let { it to onAction }).forEach { (label, onClick) ->
+                    Text(
+                        label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onClick).padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
             }
             content()
         }
@@ -363,7 +392,7 @@ private fun Pill(text: String, on: Boolean) {
 @Composable
 private fun EntryRows(
     d: AppData, entries: List<Entry>, openId: String?, onToggle: (String) -> Unit, onDelete: (String) -> Unit,
-    showDate: Boolean = true,
+    onEdit: (Entry) -> Unit, showDate: Boolean = true,
 ) {
     val names = Calc.saveNames(d)
     val groups = LinkedHashMap<String, MutableList<Entry>>()
@@ -390,6 +419,7 @@ private fun EntryRows(
                 }
                 if (openId == e.id) Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
                     OutlinedButton({ onToggle(e.id) }) { Text("취소") }
+                    OutlinedButton({ onEdit(e) }) { Text("수정") }
                     OutlinedButton({ onDelete(e.id) }, colors = ButtonDefaults.outlinedButtonColors(contentColor = outColor),
                         border = BorderStroke(1.dp, outColor)) { Text("삭제") }
                 }
@@ -523,5 +553,209 @@ fun FixedForm(f: Fixed?, onEditCats: () -> Unit, onClose: () -> Unit, onDone: (S
             }
         }
         Spacer(Modifier.height(8.dp))
+    }
+}
+
+// ---------- monthly report ----------
+@Composable
+private fun ReportCard(d: AppData, ym: String) {
+    val cur = Calc.month(d, ym)
+    val prev = Calc.month(d, Calc.shift(ym, -1))
+    val m = java.time.YearMonth.parse(ym)
+    Card("${m.monthValue}월 리포트 · 지난달 대비") {
+        CompareLine("총 지출", cur.out, prev.out)
+        CompareLine("생활비 (고정 제외)", cur.living, prev.living)
+        CompareLine("저축", cur.save, prev.save, moreIsGood = true)
+        if (cur.inc > 0) Text(
+            "저축률 ${cur.save * 100 / cur.inc}% · 수입 ${Calc.fmt(cur.inc)}원 중 ${Calc.fmt(cur.save)}원 저축",
+            fontSize = 13.sp, color = muted,
+        )
+
+        if (cur.byCat.isNotEmpty()) {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Text("지출 비중", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = muted)
+            val prevBy = prev.byCat.toMap()
+            cur.byCat.take(4).forEach { (c, v) ->
+                val share = if (cur.out > 0) v * 100 / cur.out else 0
+                val before = prevBy[c] ?: 0L
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(c, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Text("$share%", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.width(44.dp),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                    Text(
+                        if (before == 0L) "새로 생김" else delta(v - before), fontSize = 12.sp,
+                        color = if (v > before) outColor else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.width(92.dp), textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                    )
+                }
+            }
+        }
+
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        val p = Calc.projection(d)
+        val goalName = Calc.man(d.settings.goal).removeSuffix("원")
+        val target = runCatching { java.time.YearMonth.parse(d.settings.goalYm) }.getOrNull()
+        Text("$goalName 달성 예상", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = muted)
+        when {
+            p.remain == 0L -> Text("목표 금액을 채웠어!", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            p.eta == null -> Text("'저축으로 집계' 카테고리 기록이 쌓이면 달성 시점을 예상해줄게.", fontSize = 13.sp, color = muted)
+            else -> {
+                Text("${p.eta.year}년 ${p.eta.monthValue}월쯤 (${p.months}개월 뒤)", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text("최근 ${p.basis}개월 평균 저축 월 ${Calc.fmt(p.avg)}원 기준", fontSize = 12.sp, color = muted)
+                if (target != null) {
+                    val gap = (p.eta.year - target.year) * 12 + (p.eta.monthValue - target.monthValue)
+                    val left = Calc.monthsLeft(d.settings.goalYm)
+                    Text(
+                        when {
+                            gap <= 0 -> "목표(${target.year}년 ${target.monthValue}월)보다 ${-gap}개월 빨라"
+                            left > 0 -> "목표보다 ${gap}개월 늦어. 맞추려면 월 ${Calc.fmt((p.remain + left - 1) / left)}원 저축 필요"
+                            else -> "목표 달이 지났어. 목표 설정에서 날짜를 바꿔줘"
+                        },
+                        fontSize = 13.sp, color = if (gap <= 0) MaterialTheme.colorScheme.primary else outColor,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun delta(diff: Long): String = when {
+    diff > 0 -> "▲ ${Calc.fmt(diff)}"
+    diff < 0 -> "▼ ${Calc.fmt(-diff)}"
+    else -> "변동 없음"
+}
+
+/** One line of "this month vs last month". For spending, going down is good; for savings, going up is. */
+@Composable
+private fun CompareLine(label: String, now: Long, before: Long, moreIsGood: Boolean = false) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, fontSize = 13.sp, color = muted, modifier = Modifier.weight(1f))
+        Text("${Calc.fmt(now)}원", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        val diff = now - before
+        val good = if (moreIsGood) diff >= 0 else diff <= 0
+        Text(
+            if (before == 0L) "지난달 없음" else delta(diff) + if (diff != 0L) " (${kotlin.math.abs(diff) * 100 / before}%)" else "",
+            fontSize = 12.sp, color = if (before == 0L || diff == 0L) muted else if (good) MaterialTheme.colorScheme.primary else outColor,
+            modifier = Modifier.width(120.dp), textAlign = androidx.compose.ui.text.style.TextAlign.End, maxLines = 1,
+        )
+    }
+}
+
+// ---------- search ----------
+@Composable
+private fun SearchSheet(
+    d: AppData, query: String, onQuery: (String) -> Unit, type: String, onType: (String) -> Unit,
+    openId: String?, onToggle: (String) -> Unit, onDelete: (String) -> Unit, onEdit: (Entry) -> Unit,
+) {
+    val q = query.trim()
+    val hits = d.entries.filter { e ->
+        (type == "all" || e.t == type) &&
+            (q.isEmpty() || e.memo.contains(q, ignoreCase = true) || e.cat.contains(q, ignoreCase = true) || e.amt.toString() == q.filter { it.isDigit() })
+    }.sortedWith(compareByDescending<Entry> { it.d }.thenByDescending { it.ts })
+    val shown = hits.take(100)
+    Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("내역 검색 · 전체 기간", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        OutlinedTextField(
+            query, onQuery, singleLine = true, modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("메모, 카테고리 또는 금액") },
+            trailingIcon = { if (query.isNotEmpty()) TextButton({ onQuery("") }) { Text("지우기") } },
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf("all" to "전체", OUT to "지출", IN to "수입").forEach { (k, l) ->
+                androidx.compose.material3.FilterChip(selected = type == k, onClick = { onType(k) }, label = { Text(l) })
+            }
+        }
+        val outSum = hits.filter { it.t == OUT }.sumOf { it.amt }
+        val inSum = hits.filter { it.t == IN }.sumOf { it.amt }
+        Text(
+            "${hits.size}건" + (if (outSum > 0) " · 지출 ${Calc.fmt(outSum)}원" else "") + (if (inSum > 0) " · 수입 ${Calc.fmt(inSum)}원" else ""),
+            fontSize = 13.sp, color = muted,
+        )
+        Column {
+            if (hits.isEmpty()) Text(if (q.isEmpty()) "기록이 아직 없어." else "'$q'에 맞는 내역이 없어.", color = muted, fontSize = 14.sp,
+                modifier = Modifier.padding(vertical = 16.dp))
+            EntryRows(d, shown, openId, onToggle, onDelete, onEdit, showDate = true)
+            if (hits.size > shown.size) Text("최근 ${shown.size}건만 보여줘. 검색어를 더 좁혀봐.", fontSize = 12.sp, color = muted,
+                modifier = Modifier.padding(top = 8.dp))
+        }
+    }
+}
+
+// ---------- backup / import ----------
+@Composable
+private fun BackupSheet(onDone: (String) -> Unit) {
+    val ctx = LocalContext.current
+    var err by remember { mutableStateOf<String?>(null) }
+    var pending by remember { mutableStateOf<Store.Parsed?>(null) }
+
+    fun read(raw: String?) {
+        val p = raw?.let { Store.parse(it) }
+        if (p == null) err = "가계부 데이터가 아니야. 백업 파일이나 웹에서 복사한 내용인지 확인해줘."
+        else { err = null; pending = p }
+    }
+
+    val saveFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val ok = runCatching { ctx.contentResolver.openOutputStream(uri)?.use { it.write(Store.exportJson().toByteArray()) } }.isSuccess
+        if (ok) onDone("백업 파일 저장했어") else err = "파일을 저장하지 못했어. 다른 위치를 골라줘."
+    }
+    val openFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        read(runCatching { ctx.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } }.getOrNull())
+    }
+
+    Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("백업 · 가져오기", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+
+        Block("백업") {
+            Text("기록은 이 폰 안에만 있어. 앱을 지우거나 폰을 바꾸기 전에 파일로 저장해두고, 구글 드라이브 같은 곳에 올려둬.",
+                fontSize = 13.sp, color = muted)
+            Button({ saveFile.launch("1억가계부-백업-${Calc.today()}.json") }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)) {
+                Text("백업 파일로 저장")
+            }
+            OutlinedButton({ openFile.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
+                Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)) { Text("백업 파일 불러오기") }
+        }
+
+        Block("웹 가계부에서 가져오기") {
+            Text("1. 웹 가계부를 열고 맨 위 '앱으로 보내기'를 눌러 복사\n2. 여기로 돌아와서 아래 버튼 누르기", fontSize = 13.sp, color = muted)
+            OutlinedButton({
+                val cm = ctx.getSystemService(ClipboardManager::class.java)
+                read(cm?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString())
+            }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)) { Text("복사한 내용 가져오기") }
+        }
+        err?.let { Text(it, color = outColor, fontSize = 13.sp) }
+    }
+
+    pending?.let { p ->
+        val (title, body, label) = when (p) {
+            is Store.Parsed.Backup -> Triple(
+                "백업으로 바꿀까?",
+                "지금 앱에 있는 기록을 지우고 백업 내용(기록 ${p.d.entries.size}건, 고정 지출 ${p.d.fixed.size}개)으로 바꿔. 되돌릴 수 없어.",
+                "바꾸기",
+            )
+            is Store.Parsed.Web -> Triple(
+                "웹 데이터 가져올까?",
+                "기록 ${p.d.entries.size}건, 고정 지출 ${p.d.fixed.size}개, 카테고리 ${p.d.outCats.size + p.d.inCats.size}개를 지금 기록에 더해. 이미 가져온 기록은 다시 안 들어가.",
+                "가져오기",
+            )
+        }
+        AlertDialog(
+            onDismissRequest = { pending = null },
+            title = { Text(title) },
+            text = { Text(body) },
+            confirmButton = {
+                TextButton({
+                    pending = null
+                    when (p) {
+                        is Store.Parsed.Backup -> { Store.restore(ctx, p.d); onDone("백업을 불러왔어") }
+                        is Store.Parsed.Web -> { val n = Store.mergeWeb(ctx, p.d); onDone("웹 기록 ${n}건 가져왔어") }
+                    }
+                }) { Text(label, color = if (p is Store.Parsed.Backup) outColor else MaterialTheme.colorScheme.primary) }
+            },
+            dismissButton = { TextButton({ pending = null }) { Text("취소") } },
+        )
     }
 }

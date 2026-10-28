@@ -92,8 +92,18 @@ class FullWidget : AppWidgetProvider() {
         private fun handle(ctx: Context, op: String, arg: String) {
             val w = WS(ctx)
             val d = Store.data
-            w.put("msg" to null)
+            val undoId = w.s("undo")
+            w.put("msg" to null, "undo" to null)
             when (op) {
+                // Removes the record just saved and puts it back on the keypad to fix.
+                "undo" -> {
+                    val e = d.entries.find { it.id == undoId }
+                    if (e != null) {
+                        Store.deleteEntry(ctx, e.id)
+                        w.put("tab" to 0, "type" to e.t, "cat" to e.cat, "amt" to e.amt,
+                            "date" to if (e.d == Calc.today()) null else e.d, "msg" to "되돌렸어. 고쳐서 다시 저장해줘")
+                    }
+                }
                 "tab" -> w.put(
                     "tab" to (arg.toIntOrNull() ?: 0),
                     "esel" to null, "econf" to false, "csel" to null, "cconf" to false, "fsel" to null, "fconf" to false,
@@ -125,8 +135,9 @@ class FullWidget : AppWidgetProvider() {
                         cat == null -> w.put("msg" to "!카테고리 탭에서 먼저 추가해줘")
                         else -> {
                             val date = w.s("date") ?: Calc.today()
-                            Store.addEntry(ctx, Entry(Store.newId(), type, amt, cat, "", date, System.currentTimeMillis()))
-                            w.put("amt" to 0L, "msg" to "$cat ${Calc.fmt(amt)}원 저장했어")
+                            val e = Entry(Store.newId(), type, amt, cat, "", date, System.currentTimeMillis())
+                            Store.addEntry(ctx, e)
+                            w.put("amt" to 0L, "msg" to "$cat ${Calc.fmt(amt)}원 저장했어", "undo" to e.id)
                         }
                     }
                 }
@@ -268,7 +279,10 @@ class FullWidget : AppWidgetProvider() {
 
             // message line
             val msg = w.s("msg")
-            v.setViewVisibility(R.id.gMsg, if (msg.isNullOrEmpty()) View.GONE else View.VISIBLE)
+            v.setViewVisibility(R.id.gMsgRow, if (msg.isNullOrEmpty()) View.GONE else View.VISIBLE)
+            val canUndo = w.s("undo")?.let { id -> d.entries.any { it.id == id } } == true
+            v.setViewVisibility(R.id.gUndo, if (canUndo) View.VISIBLE else View.GONE)
+            v.setOnClickPendingIntent(R.id.gUndo, bcast(ctx, "undo"))
             if (!msg.isNullOrEmpty()) {
                 val err = msg.startsWith("!")
                 v.setTextViewText(R.id.gMsg, msg.removePrefix("!"))

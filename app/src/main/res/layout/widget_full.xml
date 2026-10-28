@@ -219,7 +219,14 @@
         </LinearLayout>
     </FrameLayout>
 
-    <TextView android:id="@+id/gMsg" style="@style/WfMuted"
-        android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:layout_marginTop="6dp" android:gravity="center" android:visibility="gone" />
+    <LinearLayout android:id="@+id/gMsgRow"
+        android:layout_width="match_parent" android:layout_height="32dp" android:layout_marginTop="6dp"
+        android:gravity="center_vertical" android:orientation="horizontal" android:visibility="gone">
+        <TextView android:id="@+id/gMsg" style="@style/WfMuted"
+            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+            android:gravity="center" />
+        <TextView android:id="@+id/gUndo" style="@style/WfBtn"
+            android:layout_width="wrap_content" android:layout_height="match_parent"
+            android:layout_marginStart="6dp" android:textSize="12sp" android:text="되돌리기" />
+    </LinearLayout>
 </LinearLayout>

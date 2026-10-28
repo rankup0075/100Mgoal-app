@@ -184,23 +184,33 @@ fun Actions(left: String, onLeft: () -> Unit, right: String, onRight: () -> Unit
 // ---------- add entry (used by the app sheet and the widget popup) ----------
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun AddEntryForm(initialType: String, defaultDate: String, onSaved: (Entry) -> Unit, onClose: () -> Unit) {
+fun AddEntryForm(
+    initialType: String, defaultDate: String, onSaved: (Entry) -> Unit, onClose: () -> Unit,
+    editing: Entry? = null,
+) {
     val ctx = LocalContext.current
     val data = Store.data
-    var type by remember { mutableStateOf(initialType) }
-    var amt by remember { mutableStateOf(0L) }
-    var cat by remember { mutableStateOf<String?>(null) }
-    var date by remember { mutableStateOf(defaultDate) }
-    var memo by remember { mutableStateOf("") }
+    var type by remember { mutableStateOf(editing?.t ?: initialType) }
+    var amt by remember { mutableStateOf(editing?.amt ?: 0L) }
+    var cat by remember { mutableStateOf(editing?.cat) }
+    var date by remember { mutableStateOf(editing?.d ?: defaultDate) }
+    var memo by remember { mutableStateOf(editing?.memo ?: "") }
     var err by remember { mutableStateOf<String?>(null) }
     var editCats by remember { mutableStateOf(false) }
-    val cats = data.cats(type)
+    val cats = data.cats(type).let { list ->
+        val keep = editing?.cat?.takeIf { editing.t == type && list.none { c -> c.name == it } }
+        if (keep != null) list + Cat(keep) else list
+    }
     val selected = cat?.takeIf { c -> cats.any { it.name == c } } ?: cats.firstOrNull()?.name
 
     Column(
         Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        if (editing != null) Text(
+            "내역 수정" + if (editing.fid != null) " · 고정 지출 자동 기록" else "",
+            fontSize = 17.sp, fontWeight = FontWeight.Bold,
+        )
         TypeToggle(type) { type = it; cat = null }
 
         Block("금액") {
@@ -229,6 +239,11 @@ fun AddEntryForm(initialType: String, defaultDate: String, onSaved: (Entry) -> U
             when {
                 amt <= 0 -> err = "금액을 입력해줘"
                 selected == null -> err = "카테고리를 골라줘"
+                editing != null -> {
+                    val e = editing.copy(t = type, amt = amt, cat = selected, memo = memo.trim(), d = date)
+                    Store.updateEntry(ctx, e)
+                    onSaved(e)
+                }
                 else -> {
                     val e = Entry(Store.newId(), type, amt, selected, memo.trim(), date, System.currentTimeMillis())
                     Store.addEntry(ctx, e)

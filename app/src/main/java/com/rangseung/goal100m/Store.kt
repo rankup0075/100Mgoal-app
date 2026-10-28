@@ -82,6 +82,95 @@ object Store {
 
     fun addEntry(ctx: Context, e: Entry) = update(ctx) { it.copy(entries = it.entries + e) }
     fun deleteEntry(ctx: Context, id: String) = update(ctx) { d -> d.copy(entries = d.entries.filterNot { it.id == id }) }
+    fun updateEntry(ctx: Context, e: Entry) = update(ctx) { d -> d.copy(entries = d.entries.map { if (it.id == e.id) e else it }) }
+
+    // ---------- backup / import ----------
+    /** Full backup as JSON text (same shape the app stores). */
+    fun exportJson(): String = encode(data)
+
+    sealed interface Parsed {
+        data class Backup(val d: AppData) : Parsed
+        data class Web(val d: AppData) : Parsed
+    }
+
+    /** Reads either an app backup file or the text copied from the web ledger. Returns null if it is neither. */
+    fun parse(raw: String): Parsed? {
+        val o = runCatching { JSONObject(raw.trim()) }.getOrNull() ?: return null
+        return when {
+            o.has("entries") -> runCatching { Parsed.Backup(decode(raw.trim())) }.getOrNull()
+            o.has("months") -> runCatching { Parsed.Web(decodeWeb(o)) }.getOrNull()
+            else -> null
+        }
+    }
+
+    /** Replaces everything with a backup. */
+    fun restore(ctx: Context, d: AppData) {
+        update(ctx) { d }
+        syncFixed(ctx)
+    }
+
+    /**
+     * Adds web-ledger data to what the app already has: records and fixed costs by id (no duplicates),
+     * categories by name. Goal settings are taken from the web only while the app still has the defaults.
+     * Returns how many records were added.
+     */
+    fun mergeWeb(ctx: Context, w: AppData): Int {
+        val ids = data.entries.map { it.id }.toSet()
+        val newEntries = w.entries.filter { it.id !in ids }
+        update(ctx) { d ->
+            fun merge(a: List<Cat>, b: List<Cat>) = a + b.filter { n -> a.none { it.name == n.name } }
+            val fids = d.fixed.map { it.id }.toSet()
+            d.copy(
+                entries = d.entries + newEntries,
+                outCats = merge(d.outCats, w.outCats),
+                inCats = merge(d.inCats, w.inCats),
+                fixed = d.fixed + w.fixed.filter { it.id !in fids },
+                settings = if (d.settings == Settings()) w.settings else d.settings,
+            )
+        }
+        syncFixed(ctx)
+        return newEntries.size
+    }
+
+    private fun decodeWeb(o: JSONObject): AppData {
+        val entries = mutableListOf<Entry>()
+        val months = o.getJSONObject("months")
+        months.keys().forEach { ym ->
+            val a = months.getJSONArray(ym)
+            for (i in 0 until a.length()) {
+                val e = a.getJSONObject(i)
+                entries += Entry(
+                    "w" + e.getString("id"), if (e.optString("t") == IN) IN else OUT, e.getLong("amt"), e.getString("cat"),
+                    e.optString("memo"), e.getString("d"), e.optLong("ts"),
+                    if (e.has("fid")) "w" + e.getString("fid") else null,
+                )
+            }
+        }
+        val cur = YearMonth.now().toString()
+        val fixed = (o.optJSONArray("fixed") ?: JSONArray()).let { a ->
+            (0 until a.length()).map { i ->
+                val f = a.getJSONObject(i)
+                Fixed("w" + f.getString("id"), f.getString("name"), f.getLong("amt"), f.getInt("day"), f.getString("cat"), cur, "")
+            }
+        }
+        val cats = o.optJSONObject("cats")
+        val outCats: List<Cat>
+        val inCats: List<Cat>
+        if (cats != null) {
+            outCats = cats.optJSONArray("out")?.let { a -> (0 until a.length()).map { Cat(a.getJSONObject(it).getString("name"), a.getJSONObject(it).optBoolean("save")) } } ?: emptyList()
+            inCats = cats.optJSONArray("in")?.let { a -> (0 until a.length()).map { Cat(a.getJSONObject(it).getString("name")) } } ?: emptyList()
+        } else { // the web page never saved a list: use the names its records use
+            outCats = (entries.filter { it.t == OUT }.map { it.cat } + fixed.map { it.cat }).distinct().map { Cat(it, it == "저축") }
+            inCats = entries.filter { it.t == IN }.map { it.cat }.distinct().map { Cat(it) }
+        }
+        val s = o.optJSONObject("settings") ?: JSONObject()
+        val def = Settings()
+        return AppData(
+            entries, outCats, inCats, fixed,
+            Settings(s.optLong("startSaved", def.startSaved), s.optLong("goal", def.goal), s.optString("goalYm", def.goalYm),
+                s.optLong("monthly", def.monthly), s.optLong("budget", def.budget)),
+        )
+    }
     fun saveSettings(ctx: Context, s: Settings) = update(ctx) { it.copy(settings = s) }
 
     private fun dateIn(ym: String, day: Int) = "%s-%02d".format(ym, minOf(day, YearMonth.parse(ym).lengthOfMonth()))
@@ -273,6 +362,25 @@ object Calc {
         val g = YearMonth.parse(goalYm); val c = YearMonth.now()
         max(0, (g.year - c.year) * 12 + (g.monthValue - c.monthValue) + 1)
     }.getOrDefault(0)
+
+    /** Goal pace: [avg] = average monthly saving over the last [basis] months (up to 3) that have records. */
+    data class Projection(val avg: Long, val basis: Int, val remain: Long, val months: Int?, val eta: YearMonth?)
+
+    /** When the goal is reached at the recent pace of saving. */
+    fun projection(d: AppData): Projection {
+        val remain = (d.settings.goal - totalSaved(d)).coerceAtLeast(0)
+        val names = saveNames(d)
+        val cur = YearMonth.now()
+        val first = d.entries.minOfOrNull { it.d.take(7) }?.let { runCatching { YearMonth.parse(it) }.getOrNull() }
+        if (first == null) return Projection(0, 0, remain, null, null)
+        val span = (0L..2L).map { cur.minusMonths(it) }.filter { !it.isBefore(first) }
+        val total = d.entries.filter { e -> isSave(e, names) && span.any { e.d.startsWith(it.toString()) } }.sumOf { it.amt }
+        val avg = if (span.isEmpty()) 0 else total / span.size
+        if (remain == 0L) return Projection(avg, span.size, 0, 0, cur)
+        if (avg <= 0) return Projection(0, span.size, remain, null, null)
+        val months = ((remain + avg - 1) / avg).toInt()
+        return Projection(avg, span.size, remain, months, cur.plusMonths(months.toLong()))
+    }
 
     fun fixedDone(d: AppData, fid: String, ym: String) = d.entries.any { it.fid == fid && it.d.startsWith(ym) }
 }
