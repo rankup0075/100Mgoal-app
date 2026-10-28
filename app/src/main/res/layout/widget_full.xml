@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 5x5 home-screen ledger: header, 4 tabs (기록 / 내역 / 카테고리 / 고정), one pane visible at a time. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/wf_bg"
+    android:orientation="vertical"
+    android:padding="12dp">
+
+    <!-- header -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+        <TextView android:id="@+id/hRemain" style="@style/WfText"
+            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+            android:textSize="15sp" android:textStyle="bold" android:text="남은 생활비" />
+        <TextView android:id="@+id/hGoal" style="@style/WfMuted"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="1억" />
+    </LinearLayout>
+    <ProgressBar android:id="@+id/gBar"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent" android:layout_height="5dp" android:layout_marginTop="6dp"
+        android:max="1000" android:progressDrawable="@drawable/wf_progress" />
+
+    <!-- tabs -->
+    <LinearLayout
+        android:layout_width="match_parent" android:layout_height="38dp" android:layout_marginTop="10dp"
+        android:background="@drawable/wf_card" android:orientation="horizontal" android:padding="3dp">
+        <TextView android:id="@+id/tab0" style="@style/WfTab" android:text="기록" />
+        <TextView android:id="@+id/tab1" style="@style/WfTab" android:text="내역" />
+        <TextView android:id="@+id/tab2" style="@style/WfTab" android:text="카테고리" />
+        <TextView android:id="@+id/tab3" style="@style/WfTab" android:text="고정" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_marginTop="8dp" android:layout_weight="1">
+
+        <!-- 기록 -->
+        <LinearLayout android:id="@+id/paneRec"
+            android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="34dp"
+                android:gravity="center_vertical" android:orientation="horizontal">
+                <TextView android:id="@+id/rOut" style="@style/WfBtn"
+                    android:layout_width="wrap_content" android:layout_height="match_parent" android:text="지출" />
+                <TextView android:id="@+id/rIn" style="@style/WfBtn"
+                    android:layout_width="wrap_content" android:layout_height="match_parent"
+                    android:layout_marginStart="4dp" android:text="수입" />
+                <FrameLayout android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+                <TextView android:id="@+id/rPrev" style="@style/WfBtn"
+                    android:layout_width="34dp" android:layout_height="match_parent" android:text="‹" android:textSize="18sp" />
+                <TextView android:id="@+id/rDate" style="@style/WfText"
+                    android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:paddingStart="8dp" android:paddingEnd="8dp" android:textSize="13sp" android:text="오늘" />
+                <TextView android:id="@+id/rNext" style="@style/WfBtn"
+                    android:layout_width="34dp" android:layout_height="match_parent" android:text="›" android:textSize="18sp" />
+            </LinearLayout>
+
+            <TextView android:id="@+id/rAmt" style="@style/WfText"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="2dp" android:gravity="end"
+                android:textSize="28sp" android:textStyle="bold" android:text="0원" />
+
+            <FrameLayout android:layout_width="match_parent" android:layout_height="0dp"
+                android:layout_marginTop="4dp" android:layout_weight="2">
+                <GridView android:id="@+id/rCats"
+                    android:layout_width="match_parent" android:layout_height="match_parent"
+                    android:numColumns="4" android:stretchMode="columnWidth"
+                    android:horizontalSpacing="4dp" android:verticalSpacing="4dp" />
+                <TextView android:id="@+id/rCatsEmpty" style="@style/WfMuted"
+                    android:layout_width="match_parent" android:layout_height="match_parent"
+                    android:gravity="center" android:maxLines="2"
+                    android:text="카테고리가 없어. 눌러서 먼저 추가해줘" />
+            </FrameLayout>
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="0dp"
+                android:layout_marginTop="4dp" android:layout_weight="5" android:orientation="vertical">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+                    <TextView android:id="@+id/k1" style="@style/WfKey" android:text="1" />
+                    <TextView android:id="@+id/k2" style="@style/WfKey" android:text="2" />
+                    <TextView android:id="@+id/k3" style="@style/WfKey" android:text="3" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+                    <TextView android:id="@+id/k4" style="@style/WfKey" android:text="4" />
+                    <TextView android:id="@+id/k5" style="@style/WfKey" android:text="5" />
+                    <TextView android:id="@+id/k6" style="@style/WfKey" android:text="6" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+                    <TextView android:id="@+id/k7" style="@style/WfKey" android:text="7" />
+                    <TextView android:id="@+id/k8" style="@style/WfKey" android:text="8" />
+                    <TextView android:id="@+id/k9" style="@style/WfKey" android:text="9" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+                    <TextView android:id="@+id/k00" style="@style/WfKey" android:text="00" />
+                    <TextView android:id="@+id/k0" style="@style/WfKey" android:text="0" />
+                    <TextView android:id="@+id/kBack" style="@style/WfKey" android:text="⌫" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout style="@style/WfBar">
+                <TextView android:id="@+id/rClear" style="@style/WfBtn"
+                    android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="지우기" />
+                <TextView android:id="@+id/rSave" style="@style/WfBtn"
+                    android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="2"
+                    android:layout_marginStart="6dp" android:background="@drawable/wf_accent"
+                    android:textColor="#FF0B1A15" android:text="저장" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 내역 -->
+        <LinearLayout android:id="@+id/paneHist" android:visibility="gone"
+            android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="34dp"
+                android:gravity="center_vertical" android:orientation="horizontal">
+                <TextView android:id="@+id/hPrevM" style="@style/WfBtn"
+                    android:layout_width="34dp" android:layout_height="match_parent" android:text="‹" android:textSize="18sp" />
+                <TextView android:id="@+id/hMonth" style="@style/WfText"
+                    android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:gravity="center" android:textStyle="bold" android:text="" />
+                <TextView android:id="@+id/hNextM" style="@style/WfBtn"
+                    android:layout_width="34dp" android:layout_height="match_parent" android:text="›" android:textSize="18sp" />
+            </LinearLayout>
+            <TextView android:id="@+id/hSum" style="@style/WfMuted"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="4dp" android:gravity="center" />
+            <FrameLayout android:layout_width="match_parent" android:layout_height="0dp"
+                android:layout_marginTop="6dp" android:layout_weight="1">
+                <ListView android:id="@+id/hList"
+                    android:layout_width="match_parent" android:layout_height="match_parent"
+                    android:divider="@android:color/transparent" android:dividerHeight="4dp" />
+                <TextView android:id="@+id/hEmpty" style="@style/WfMuted"
+                    android:layout_width="match_parent" android:layout_height="match_parent"
+                    android:gravity="center" android:text="이 달 기록이 없어" />
+            </FrameLayout>
+            <LinearLayout android:id="@+id/eBar" style="@style/WfBar" android:visibility="gone">
+                <TextView android:id="@+id/eCancel" style="@style/WfBtn"
+                    android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="취소" />
+                <TextView android:id="@+id/eDel" style="@style/WfBtn"
+                    android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                    android:layout_marginStart="6dp" android:background="@drawable/wf_danger"
+                    android:textColor="#FFF08A5D" android:text="삭제" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 카테고리 -->
+        <LinearLayout android:id="@+id/paneCat" android:visibility="gone"
+            android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="34dp"
+                android:gravity="center_vertical" android:orientation="horizontal">
+                <TextView android:id="@+id/cOut" style="@style/WfBtn"
+                    android:layout_width="wrap_content" android:layout_height="match_parent" android:text="지출" />
+                <TextView android:id="@+id/cIn" style="@style/WfBtn"
+                    android:layout_width="wrap_content" android:layout_height="match_parent"
+                    android:layout_marginStart="4dp" android:text="수입" />
+                <FrameLayout android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+                <TextView android:id="@+id/cAdd" style="@style/WfBtn"
+                    android:layout_width="wrap_content" android:layout_height="match_parent"
+                    android:background="@drawable/wf_accent" android:textColor="#FF0B1A15" android:text="+ 추가" />
+            </LinearLayout>
+            <FrameLayout android:layout_width="match_parent" android:layout_height="0dp"
+                android:layout_marginTop="6dp" android:layout_weight="1">
+                <ListView android:id="@+id/cList"
+                    android:layout_width="match_parent" android:layout_height="match_parent"
+                    android:divider="@android:color/transparent" android:dividerHeight="4dp" />
+                <TextView android:id="@+id/cEmpty" style="@style/WfMuted"
+                    android:layout_width="match_parent" android:layout_height="match_parent"
+                    android:gravity="center" android:text="+ 추가로 카테고리를 만들어줘" />
+            </FrameLayout>
+            <LinearLayout android:id="@+id/cBar" style="@style/WfBar" android:visibility="gone">
+                <TextView android:id="@+id/cSave" style="@style/WfBtn"
+                    android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1.3"
+                    android:textSize="12sp" android:text="저축 집계" />
+                <TextView android:id="@+id/cRename" style="@style/WfBtn"
+                    android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                    android:layout_marginStart="6dp" android:textSize="12sp" android:text="이름 수정" />
+                <TextView android:id="@+id/cDel" style="@style/WfBtn"
+                    android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                    android:layout_marginStart="6dp" android:background="@drawable/wf_danger"
+                    android:textColor="#FFF08A5D" android:textSize="12sp" android:text="삭제" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 고정 -->
+        <LinearLayout android:id="@+id/paneFix" android:visibility="gone"
+            android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="34dp"
+                android:gravity="center_vertical" android:orientation="horizontal">
+                <TextView android:id="@+id/fTotal" style="@style/WfText"
+                    android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:textStyle="bold" />
+                <TextView android:id="@+id/fAdd" style="@style/WfBtn"
+                    android:layout_width="wrap_content" android:layout_height="match_parent"
+                    android:background="@drawable/wf_accent" android:textColor="#FF0B1A15" android:text="+ 추가" />
+            </LinearLayout>
+            <FrameLayout android:layout_width="match_parent" android:layout_height="0dp"
+                android:layout_marginTop="6dp" android:layout_weight="1">
+                <ListView android:id="@+id/fList"
+                    android:layout_width="match_parent" android:layout_height="match_parent"
+                    android:divider="@android:color/transparent" android:dividerHeight="4dp" />
+                <TextView android:id="@+id/fEmpty" style="@style/WfMuted"
+                    android:layout_width="match_parent" android:layout_height="match_parent"
+                    android:gravity="center" android:maxLines="2"
+                    android:text="통신비·구독료·적금처럼 매달 나가는 돈을 + 추가로 등록해줘" />
+            </FrameLayout>
+            <LinearLayout android:id="@+id/fBar" style="@style/WfBar" android:visibility="gone">
+                <TextView android:id="@+id/fCancel" style="@style/WfBtn"
+                    android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="취소" />
+                <TextView android:id="@+id/fEdit" style="@style/WfBtn"
+                    android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                    android:layout_marginStart="6dp" android:text="수정" />
+                <TextView android:id="@+id/fDel" style="@style/WfBtn"
+                    android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                    android:layout_marginStart="6dp" android:background="@drawable/wf_danger"
+                    android:textColor="#FFF08A5D" android:text="삭제" />
+            </LinearLayout>
+            <TextView android:id="@+id/fApply" style="@style/WfBtn"
+                android:layout_width="match_parent" android:layout_height="42dp" android:layout_marginTop="6dp"
+                android:background="@drawable/wf_accent" android:textColor="#FF0B1A15" android:text="이번 달 고정 지출 기록" />
+        </LinearLayout>
+    </FrameLayout>
+
+    <TextView android:id="@+id/gMsg" style="@style/WfMuted"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="6dp" android:gravity="center" android:visibility="gone" />
+</LinearLayout>

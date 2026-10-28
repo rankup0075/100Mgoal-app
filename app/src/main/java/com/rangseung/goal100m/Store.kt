@@ -66,6 +66,7 @@ object Store {
         data = f(data)
         ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putString(KEY, encode(data)).apply()
         GoalWidget.refresh(ctx.applicationContext)
+        FullWidget.render(ctx.applicationContext)
     }
 
     fun newId(): String = java.lang.Long.toString(System.currentTimeMillis(), 36) +

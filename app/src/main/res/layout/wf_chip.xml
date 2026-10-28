@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/chip"
+    style="@style/WfBtn"
+    android:layout_width="match_parent"
+    android:layout_height="34dp"
+    android:paddingStart="4dp"
+    android:paddingEnd="4dp"
+    android:textSize="13sp"
+    android:textStyle="normal" />

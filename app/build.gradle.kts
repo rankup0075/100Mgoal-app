@@ -10,7 +10,7 @@ android {
 
     defaultConfig {
         applicationId = "com.rangseung.goal100m"
-        minSdk = 26
+        minSdk = 31
         targetSdk = 34
         // Every CI build gets a higher version so the phone accepts it as an update.
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()

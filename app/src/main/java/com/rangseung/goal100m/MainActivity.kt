@@ -361,7 +361,7 @@ private fun GoalForm(s: Settings, onClose: () -> Unit, onSave: (Settings) -> Uni
 }
 
 @Composable
-private fun FixedForm(f: Fixed?, onEditCats: () -> Unit, onClose: () -> Unit, onDone: (String) -> Unit) {
+fun FixedForm(f: Fixed?, onEditCats: () -> Unit, onClose: () -> Unit, onDone: (String) -> Unit) {
     val ctx = LocalContext.current
     var name by remember { mutableStateOf(f?.name ?: "") }
     var amt by remember { mutableStateOf(f?.amt ?: 0L) }

@@ -29,10 +29,32 @@
             android:theme="@style/Theme.Goal.Sheet"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- Text-entry popup for the 5x5 widget (category names, fixed costs). -->
+        <activity
+            android:name=".WidgetEditActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Goal.Sheet"
+            android:windowSoftInputMode="adjustResize|stateVisible" />
+
+        <receiver
+            android:name=".FullWidget"
+            android:exported="true"
+            android:label="1억 가계부 (전체)">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/full_widget_info" />
+        </receiver>
+
         <receiver
             android:name=".GoalWidget"
             android:exported="true"
-            android:label="1억 가계부">
+            android:label="1억 가계부 (작게)">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
