@@ -216,9 +216,6 @@
                     android:layout_marginStart="6dp" android:background="@drawable/wf_danger"
                     android:textColor="#FFF08A5D" android:text="삭제" />
             </LinearLayout>
-            <TextView android:id="@+id/fApply" style="@style/WfBtn"
-                android:layout_width="match_parent" android:layout_height="42dp" android:layout_marginTop="6dp"
-                android:background="@drawable/wf_accent" android:textColor="#FF0B1A15" android:text="이번 달 고정 지출 기록" />
         </LinearLayout>
     </FrameLayout>
 

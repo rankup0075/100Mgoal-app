@@ -65,12 +65,23 @@ class MainActivity : ComponentActivity() {
         Store.load(this)
         setContent { AppTheme { MainScreen() } }
     }
+
+    // A new month may have started while the app sat in the background.
+    override fun onResume() {
+        super.onResume()
+        Store.syncFixed(this)
+    }
 }
+
+private const val PAGE = 5
 
 private sealed interface Sheet {
     data object Add : Sheet
     data object Goal : Sheet
     data class EditFixed(val f: Fixed?) : Sheet
+    data object AllFixed : Sheet
+    data object AllEntries : Sheet
+    data class Day(val date: String) : Sheet
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -82,8 +93,15 @@ private fun MainScreen() {
     var sheet by remember { mutableStateOf<Sheet?>(null) }
     var catsFor by remember { mutableStateOf<String?>(null) }
     var openId by remember { mutableStateOf<String?>(null) }
+    var fixedShown by rememberSaveable { mutableStateOf(PAGE) }
+    var entriesShown by rememberSaveable(ym) { mutableStateOf(PAGE) }
     val sum = Calc.month(data, ym)
+    val monthEntries = data.entries.filter { it.d.startsWith(ym) }
+        .sortedWith(compareByDescending<Entry> { it.d }.thenByDescending { it.ts })
+    val fixed = data.fixed.sortedBy { it.day }
     fun toast(m: String) = Toast.makeText(ctx, m, Toast.LENGTH_SHORT).show()
+    val toggle: (String) -> Unit = { openId = if (openId == it) null else it }
+    val delete: (String) -> Unit = { Store.deleteEntry(ctx, it); openId = null; toast("삭제했어") }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -127,10 +145,17 @@ private fun MainScreen() {
             item { SummaryRow(sum) }
             item { BudgetCard(sum, data.settings) }
             item {
-                FixedCard(data, ym,
-                    onAdd = { sheet = Sheet.EditFixed(null) },
-                    onOpen = { sheet = Sheet.EditFixed(it) },
-                    onApply = { val n = Store.applyFixed(ctx, ym); if (n > 0) toast("고정 지출 ${n}건 기록했어") })
+                Card(
+                    "고정 지출" + if (fixed.isNotEmpty()) " · 월 ${Calc.fmt(fixed.sumOf { it.amt })}원" else "",
+                    action = if (fixed.isNotEmpty()) "전체보기" else null, onAction = { sheet = Sheet.AllFixed },
+                ) {
+                    if (fixed.isEmpty()) Text("통신비, 구독료, 적금처럼 매달 나가는 돈을 등록해둬. 매달 결제일에 맞춰 자동으로 기록돼.", fontSize = 14.sp, color = muted)
+                    FixedRows(fixed.take(fixedShown)) { sheet = Sheet.EditFixed(it) }
+                    MoreButton(fixed.size, fixedShown) { fixedShown = it }
+                    OutlinedButton({ sheet = Sheet.EditFixed(null) }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)) {
+                        Text("+ 고정 지출 추가")
+                    }
+                }
             }
             item {
                 Card("카테고리별 지출") {
@@ -145,15 +170,21 @@ private fun MainScreen() {
                     }
                 }
             }
-            item { EntryList(data, ym, openId, onToggle = { openId = if (openId == it) null else it }, onDelete = {
-                Store.deleteEntry(ctx, it); openId = null; toast("삭제했어")
-            }) }
+            item {
+                Card("내역", action = if (monthEntries.isNotEmpty()) "전체보기" else null, onAction = { sheet = Sheet.AllEntries }) {
+                    if (monthEntries.isEmpty()) Text("이번 달 기록이 없어.\n아래 + 기록하기로 첫 기록을 남겨봐.", color = muted, fontSize = 14.sp,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    EntryRows(data, monthEntries.take(entriesShown), openId, toggle, delete)
+                    MoreButton(monthEntries.size, entriesShown) { entriesShown = it }
+                }
+            }
+            item { CalendarCard(data, ym) { sheet = Sheet.Day(it) } }
         }
     }
 
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     sheet?.let { s ->
-        ModalBottomSheet(onDismissRequest = { sheet = null }, sheetState = state, containerColor = MaterialTheme.colorScheme.surface) {
+        ModalBottomSheet(onDismissRequest = { sheet = null; openId = null }, sheetState = state, containerColor = MaterialTheme.colorScheme.surface) {
             when (s) {
                 Sheet.Add -> AddEntryForm(
                     initialType = OUT,
@@ -167,6 +198,26 @@ private fun MainScreen() {
                 is Sheet.EditFixed -> FixedForm(s.f, onEditCats = { catsFor = OUT }, onClose = { sheet = null }) { msg ->
                     sheet = null; toast(msg)
                 }
+                Sheet.AllFixed -> SheetList("고정 지출 전체 (${fixed.size})", "매달 합계 ${Calc.fmt(fixed.sumOf { it.amt })}원") {
+                    FixedRows(fixed) { sheet = Sheet.EditFixed(it) }
+                }
+                Sheet.AllEntries -> {
+                    val m = java.time.YearMonth.parse(ym)
+                    SheetList("${m.monthValue}월 내역 전체 (${monthEntries.size})", "수입 ${Calc.fmt(sum.inc)} · 지출 ${Calc.fmt(sum.out)} · 저축 ${Calc.fmt(sum.save)}") {
+                        EntryRows(data, monthEntries, openId, toggle, delete)
+                    }
+                }
+                is Sheet.Day -> {
+                    val list = data.entries.filter { it.d == s.date }.sortedByDescending { it.ts }
+                    val dt = LocalDate.parse(s.date)
+                    val inc = list.filter { it.t == IN }.sumOf { it.amt }
+                    val names = Calc.saveNames(data)
+                    val out = list.filter { it.t == OUT && !Calc.isSave(it, names) }.sumOf { it.amt }
+                    SheetList("${dt.monthValue}월 ${dt.dayOfMonth}일 (${"월화수목금토일"[dt.dayOfWeek.value - 1]})", "수입 ${Calc.fmt(inc)} · 지출 ${Calc.fmt(out)}") {
+                        if (list.isEmpty()) Text("이 날은 기록이 없어.", color = muted, fontSize = 14.sp, modifier = Modifier.padding(vertical = 16.dp))
+                        EntryRows(data, list, openId, toggle, delete, showDate = false)
+                    }
+                }
             }
         }
     }
@@ -175,15 +226,43 @@ private fun MainScreen() {
 
 // ---------- cards ----------
 @Composable
-private fun Card(title: String, trailing: String? = null, content: @Composable ColumnScope.() -> Unit) {
+private fun Card(title: String, action: String? = null, onAction: () -> Unit = {}, content: @Composable ColumnScope.() -> Unit) {
     Surface(shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row {
-                Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = muted, modifier = Modifier.weight(1f))
-                trailing?.let { Text(it, fontSize = 13.sp, color = muted) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = muted, modifier = Modifier.weight(1f),
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (action != null) Text(
+                    action, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onAction).padding(horizontal = 6.dp, vertical = 2.dp),
+                )
             }
             content()
         }
+    }
+}
+
+/** Shows 5 more each tap; once everything is shown it collapses back to 5. Hidden when there are 5 or fewer. */
+@Composable
+private fun MoreButton(total: Int, shown: Int, onChange: (Int) -> Unit) {
+    if (total <= PAGE) return
+    val all = shown >= total
+    TextButton(
+        onClick = { onChange(if (all) PAGE else shown + PAGE) },
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(if (all) "접기 ▲" else "더보기 (${total - shown}개 남음) ▼", color = muted, fontSize = 13.sp)
+    }
+}
+
+@Composable
+private fun SheetList(title: String, subtitle: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
+    ) {
+        Text(title, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text(subtitle, fontSize = 13.sp, color = muted, modifier = Modifier.padding(top = 2.dp, bottom = 8.dp))
+        content()
     }
 }
 
@@ -237,47 +316,34 @@ private fun SummaryRow(sum: MonthSum) {
 
 @Composable
 private fun BudgetCard(sum: MonthSum, s: Settings) {
-    Card("생활비 예산") {
-        val ratio = if (s.budget > 0) sum.out.toFloat() / s.budget else 0f
+    Card("생활비 예산 · 고정 지출 제외") {
+        val living = sum.living
+        val ratio = if (s.budget > 0) living.toFloat() / s.budget else 0f
         Bar(ratio, if (ratio > 1) outColor else MaterialTheme.colorScheme.primary, Modifier.fillMaxWidth())
         Text(
             when {
                 s.budget <= 0 -> "예산 미설정"
-                sum.out <= s.budget -> "${Calc.fmt(sum.out)} / ${Calc.fmt(s.budget)}원 · ${Calc.fmt(s.budget - sum.out)}원 남음"
-                else -> "${Calc.fmt(sum.out - s.budget)}원 초과"
+                living <= s.budget -> "${Calc.fmt(living)} / ${Calc.fmt(s.budget)}원 · ${Calc.fmt(s.budget - living)}원 남음"
+                else -> "${Calc.fmt(living - s.budget)}원 초과"
             }, fontSize = 13.sp, color = muted,
         )
+        if (sum.fixedOut > 0) Text("고정 지출 ${Calc.fmt(sum.fixedOut)}원은 따로 계산돼", fontSize = 13.sp, color = muted)
         Text("이번 달 저축 ${Calc.fmt(sum.save)} / 목표 ${Calc.fmt(s.monthly)}원" +
             if (sum.inc > 0) " · 남은 돈 ${Calc.fmt(sum.inc - sum.out - sum.save)}원" else "", fontSize = 13.sp, color = muted)
     }
 }
 
 @Composable
-private fun FixedCard(d: AppData, ym: String, onAdd: () -> Unit, onOpen: (Fixed) -> Unit, onApply: () -> Unit) {
-    val items = d.fixed.sortedBy { it.day }
-    Card("고정 지출", if (items.isNotEmpty()) "월 ${Calc.fmt(items.sumOf { it.amt })}원" else null) {
-        if (items.isEmpty()) Text("통신비, 구독료, 적금처럼 매달 나가는 돈을 등록해둬.", fontSize = 14.sp, color = muted)
-        items.forEach { f ->
-            val done = Calc.fixedDone(d, f.id, ym)
-            Row(Modifier.fillMaxWidth().clickable { onOpen(f) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(f.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("매달 ${f.day}일 · ${f.cat}", fontSize = 12.sp, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text("${Calc.fmt(f.amt)}원")
-                    Pill(if (done) "기록됨" else "미기록", done)
-                }
+private fun FixedRows(list: List<Fixed>, onOpen: (Fixed) -> Unit) {
+    list.forEach { f ->
+        Row(Modifier.fillMaxWidth().clickable { onOpen(f) }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(f.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("매달 ${f.day}일 · ${f.cat}", fontSize = 12.sp, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Text("${Calc.fmt(f.amt)}원")
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onAdd, Modifier.weight(1f), shape = RoundedCornerShape(10.dp)) { Text("+ 고정 지출 추가", maxLines = 1) }
-            OutlinedButton(
-                onApply, Modifier.weight(1f), enabled = items.any { !Calc.fixedDone(d, it.id, ym) },
-                shape = RoundedCornerShape(10.dp), border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
-            ) { Text("${ym.substring(5).toInt()}월 기록하기", maxLines = 1) }
-        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 
@@ -289,47 +355,99 @@ private fun Pill(text: String, on: Boolean) {
         border = if (on) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Text(text, fontSize = 11.sp, color = if (on) MaterialTheme.colorScheme.onPrimaryContainer else muted,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 1.dp))
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 1.dp), maxLines = 1)
     }
 }
 
+/** Entries grouped under date headers, in the order given. Tap a row to reveal delete. */
 @Composable
-private fun EntryList(d: AppData, ym: String, openId: String?, onToggle: (String) -> Unit, onDelete: (String) -> Unit) {
+private fun EntryRows(
+    d: AppData, entries: List<Entry>, openId: String?, onToggle: (String) -> Unit, onDelete: (String) -> Unit,
+    showDate: Boolean = true,
+) {
     val names = Calc.saveNames(d)
-    val es = d.entries.filter { it.d.startsWith(ym) }
-    Card("내역") {
-        if (es.isEmpty()) {
-            Text("이번 달 기록이 없어.\n아래 + 기록하기로 첫 기록을 남겨봐.", color = muted, fontSize = 14.sp,
-                modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-            return@Card
-        }
-        es.groupBy { it.d }.toSortedMap(compareByDescending { it }).forEach { (day, list) ->
-            val dt = runCatching { LocalDate.parse(day) }.getOrNull()
-            Column {
-                Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+    val groups = LinkedHashMap<String, MutableList<Entry>>()
+    entries.forEach { groups.getOrPut(it.d) { mutableListOf() } += it }
+    groups.forEach { (day, list) ->
+        Column {
+            if (showDate) {
+                val dt = runCatching { LocalDate.parse(day) }.getOrNull()
+                Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp)) {
                     Text(dt?.let { "${it.monthValue}.${it.dayOfMonth} (${"월화수목금토일"[it.dayOfWeek.value - 1]})" } ?: day,
                         fontSize = 12.sp, color = muted, modifier = Modifier.weight(1f))
-                    Text("-" + Calc.fmt(list.filter { it.t == OUT }.sumOf { it.amt }), fontSize = 12.sp, color = muted)
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                list.sortedByDescending { it.ts }.forEach { e ->
-                    val save = Calc.isSave(e, names)
-                    val color = when { e.t == IN -> inColor; save -> MaterialTheme.colorScheme.primary; else -> outColor }
-                    Row(Modifier.fillMaxWidth().clickable { onToggle(e.id) }.padding(vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Pill(e.cat, save)
-                        Text(e.memo, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text((if (e.t == IN) "+" else "-") + Calc.fmt(e.amt), color = color, fontWeight = FontWeight.SemiBold)
+            }
+            list.forEach { e ->
+                val save = Calc.isSave(e, names)
+                val color = when { e.t == IN -> inColor; save -> MaterialTheme.colorScheme.primary; else -> outColor }
+                Row(Modifier.fillMaxWidth().clickable { onToggle(e.id) }.padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Pill(e.cat, save)
+                    Text(e.memo + if (e.fid != null) " · 고정" else "", modifier = Modifier.weight(1f),
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text((if (e.t == IN) "+" else "-") + Calc.fmt(e.amt), color = color, fontWeight = FontWeight.SemiBold)
+                }
+                if (openId == e.id) Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+                    OutlinedButton({ onToggle(e.id) }) { Text("취소") }
+                    OutlinedButton({ onDelete(e.id) }, colors = ButtonDefaults.outlinedButtonColors(contentColor = outColor),
+                        border = BorderStroke(1.dp, outColor)) { Text("삭제") }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
+        }
+    }
+}
+
+/** Month grid; each day shows its income (+) and spending (-). Savings are left out of spending. Tap a day for its list. */
+@Composable
+private fun CalendarCard(d: AppData, ym: String, onDay: (String) -> Unit) {
+    val m = java.time.YearMonth.parse(ym)
+    val names = Calc.saveNames(d)
+    val inc = HashMap<String, Long>()
+    val out = HashMap<String, Long>()
+    d.entries.filter { it.d.startsWith(ym) }.forEach { e ->
+        when {
+            e.t == IN -> inc[e.d] = (inc[e.d] ?: 0) + e.amt
+            !Calc.isSave(e, names) -> out[e.d] = (out[e.d] ?: 0) + e.amt
+        }
+    }
+    val today = LocalDate.now()
+    val lead = m.atDay(1).dayOfWeek.value % 7 // Sunday first
+    val cells: List<Int?> = List(lead) { null } + (1..m.lengthOfMonth()).toList()
+    Card("${m.monthValue}월 달력") {
+        Row {
+            "일월화수목금토".forEachIndexed { i, c ->
+                Text(c.toString(), fontSize = 11.sp, color = if (i == 0) outColor.copy(alpha = .8f) else muted,
+                    modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            }
+        }
+        cells.chunked(7).forEach { week ->
+            Row {
+                (0 until 7).forEach { i ->
+                    val day = week.getOrNull(i)
+                    if (day == null) Spacer(Modifier.weight(1f).height(56.dp))
+                    else {
+                        val date = m.atDay(day)
+                        val key = date.toString()
+                        val isToday = date == today
+                        Column(
+                            Modifier.weight(1f).height(56.dp).clip(RoundedCornerShape(8.dp))
+                                .background(if (isToday) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+                                .clickable { onDay(key) }.padding(top = 4.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text(day.toString(), fontSize = 12.sp, fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isToday) MaterialTheme.colorScheme.onPrimaryContainer else if (i == 0) outColor.copy(alpha = .8f) else MaterialTheme.colorScheme.onSurface)
+                            inc[key]?.let { Text("+" + Calc.short(it), fontSize = 9.sp, color = inColor, maxLines = 1, lineHeight = 11.sp) }
+                            out[key]?.let { Text("-" + Calc.short(it), fontSize = 9.sp, color = outColor, maxLines = 1, lineHeight = 11.sp) }
+                        }
                     }
-                    if (openId == e.id) Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
-                        OutlinedButton({ onToggle(e.id) }) { Text("취소") }
-                        OutlinedButton({ onDelete(e.id) }, colors = ButtonDefaults.outlinedButtonColors(contentColor = outColor),
-                            border = BorderStroke(1.dp, outColor)) { Text("삭제") }
-                    }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
             }
         }
+        val mi = inc.values.sum(); val mo = out.values.sum()
+        Text("이번 달 수입 ${Calc.fmt(mi)} · 지출 ${Calc.fmt(mo)}", fontSize = 12.sp, color = muted)
     }
 }
 

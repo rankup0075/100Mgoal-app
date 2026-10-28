@@ -35,12 +35,12 @@ class GoalWidget : AppWidgetProvider() {
 
             val v = RemoteViews(ctx.packageName, R.layout.widget_goal)
             if (bud > 0) {
-                val left = bud - sum.out
+                val left = bud - sum.living
                 v.setTextViewText(R.id.label, "이번 달 생활비 · 예산 ${Calc.man(bud)}")
                 v.setTextViewText(R.id.remain, if (left >= 0) "${Calc.fmt(left)}원 남음" else "${Calc.fmt(-left)}원 초과")
             } else {
                 v.setTextViewText(R.id.label, "이번 달 지출")
-                v.setTextViewText(R.id.remain, "${Calc.fmt(sum.out)}원")
+                v.setTextViewText(R.id.remain, "${Calc.fmt(sum.living)}원")
             }
             v.setProgressBar(R.id.progress, 1000, (pct * 1000).toInt(), false)
             v.setTextViewText(R.id.goal, "${Calc.man(goal)} 목표 · ${Calc.man(saved)} (${"%.1f".format(pct * 100)}%)")

@@ -24,7 +24,11 @@ data class Entry(
 
 data class Cat(val name: String, val save: Boolean = false)
 
-data class Fixed(val id: String, val name: String, val amt: Long, val day: Int, val cat: String)
+/** [since] = first month it applies to; [done] = last month already auto-recorded ("" = none yet). */
+data class Fixed(
+    val id: String, val name: String, val amt: Long, val day: Int, val cat: String,
+    val since: String = YearMonth.now().toString(), val done: String = "",
+)
 
 data class Settings(
     val startSaved: Long = 0,
@@ -44,7 +48,10 @@ data class AppData(
     fun cats(t: String) = if (t == OUT) outCats else inCats
 }
 
-data class MonthSum(val inc: Long, val out: Long, val save: Long, val byCat: List<Pair<String, Long>>)
+/** [out] = all spending except savings; [fixedOut] = the part of it that came from fixed costs. */
+data class MonthSum(val inc: Long, val out: Long, val save: Long, val byCat: List<Pair<String, Long>>, val fixedOut: Long) {
+    val living: Long get() = out - fixedOut
+}
 
 /** All app data lives in one JSON blob in SharedPreferences; the UI reads [data] as Compose state. */
 object Store {
@@ -59,6 +66,7 @@ object Store {
         val raw = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).getString(KEY, null)
         data = raw?.let { runCatching { decode(it) }.getOrNull() } ?: AppData()
         loaded = true
+        syncFixed(ctx)
     }
 
     private fun update(ctx: Context, f: (AppData) -> AppData) {
@@ -76,24 +84,66 @@ object Store {
     fun deleteEntry(ctx: Context, id: String) = update(ctx) { d -> d.copy(entries = d.entries.filterNot { it.id == id }) }
     fun saveSettings(ctx: Context, s: Settings) = update(ctx) { it.copy(settings = s) }
 
-    fun upsertFixed(ctx: Context, f: Fixed) = update(ctx) { d ->
-        val exists = d.fixed.any { it.id == f.id }
-        d.copy(fixed = if (exists) d.fixed.map { if (it.id == f.id) f else it } else d.fixed + f)
+    private fun dateIn(ym: String, day: Int) = "%s-%02d".format(ym, minOf(day, YearMonth.parse(ym).lengthOfMonth()))
+
+    /**
+     * Adds or edits a fixed cost. A new one is recorded for this month right away.
+     * An edit also rewrites this month's and later auto-records; past months stay as they were.
+     */
+    fun upsertFixed(ctx: Context, f: Fixed) {
+        val cur = Calc.curYm()
+        update(ctx) { d ->
+            val old = d.fixed.find { it.id == f.id }
+            if (old == null) d.copy(fixed = d.fixed + f.copy(since = cur, done = ""))
+            else d.copy(
+                fixed = d.fixed.map { if (it.id == f.id) f.copy(since = old.since, done = old.done) else it },
+                entries = d.entries.map { e ->
+                    if (e.fid == f.id && e.d.substring(0, 7) >= cur)
+                        e.copy(amt = f.amt, cat = f.cat, memo = f.name, d = dateIn(e.d.substring(0, 7), f.day))
+                    else e
+                },
+            )
+        }
+        syncFixed(ctx)
     }
 
-    fun deleteFixed(ctx: Context, id: String) = update(ctx) { d -> d.copy(fixed = d.fixed.filterNot { it.id == id }) }
-
-    /** Records every fixed cost not yet recorded in [ym]; returns how many were added. */
-    fun applyFixed(ctx: Context, ym: String): Int {
-        val todo = data.fixed.filterNot { f -> Calc.fixedDone(data, f.id, ym) }
-        if (todo.isEmpty()) return 0
-        val last = YearMonth.parse(ym).lengthOfMonth()
-        val now = System.currentTimeMillis()
-        val added = todo.mapIndexed { i, f ->
-            Entry(newId() + i, OUT, f.amt, f.cat, f.name, "%s-%02d".format(ym, minOf(f.day, last)), now + i, f.id)
+    /** Removes a fixed cost and its auto-record for this month onward; past months stay. */
+    fun deleteFixed(ctx: Context, id: String) {
+        val cur = Calc.curYm()
+        update(ctx) { d ->
+            d.copy(
+                fixed = d.fixed.filterNot { it.id == id },
+                entries = d.entries.filterNot { it.fid == id && it.d.substring(0, 7) >= cur },
+            )
         }
-        update(ctx) { it.copy(entries = it.entries + added) }
-        return added.size
+    }
+
+    /**
+     * Records every fixed cost once per month, from the month after [Fixed.done] (or [Fixed.since])
+     * through the current month. Safe to call any time; deleting an auto-record by hand keeps it deleted.
+     */
+    fun syncFixed(ctx: Context) {
+        if (!loaded) { load(ctx); return }
+        val cur = YearMonth.now()
+        val now = System.currentTimeMillis()
+        val added = mutableListOf<Entry>()
+        var changed = false
+        val fixed = data.fixed.map { f ->
+            val start = runCatching {
+                if (f.done.isNotEmpty()) YearMonth.parse(f.done).plusMonths(1) else YearMonth.parse(f.since)
+            }.getOrDefault(cur)
+            if (start.isAfter(cur)) return@map f
+            var m = maxOf(start, cur.minusMonths(24))
+            while (!m.isAfter(cur)) {
+                val ym = m.toString()
+                if (!Calc.fixedDone(data, f.id, ym))
+                    added += Entry(newId() + added.size, OUT, f.amt, f.cat, f.name, dateIn(ym, f.day), now + added.size, f.id)
+                m = m.plusMonths(1)
+            }
+            changed = true
+            f.copy(done = cur.toString())
+        }
+        if (changed) update(ctx) { it.copy(fixed = fixed, entries = it.entries + added) }
     }
 
     /** Returns an error message, or null on success. */
@@ -137,7 +187,8 @@ object Store {
         fun cats(l: List<Cat>) = JSONArray().apply { l.forEach { put(JSONObject().put("name", it.name).put("save", it.save)) } }
         o.put("outCats", cats(d.outCats)).put("inCats", cats(d.inCats))
         o.put("fixed", JSONArray().apply {
-            d.fixed.forEach { put(JSONObject().put("id", it.id).put("name", it.name).put("amt", it.amt).put("day", it.day).put("cat", it.cat)) }
+            d.fixed.forEach { put(JSONObject().put("id", it.id).put("name", it.name).put("amt", it.amt).put("day", it.day).put("cat", it.cat)
+                .put("since", it.since).put("done", it.done)) }
         })
         val s = d.settings
         o.put("settings", JSONObject().put("startSaved", s.startSaved).put("goal", s.goal).put("goalYm", s.goalYm)
@@ -160,7 +211,10 @@ object Store {
             },
             outCats = arr("outCats") { Cat(it.getString("name"), it.optBoolean("save")) },
             inCats = arr("inCats") { Cat(it.getString("name")) },
-            fixed = arr("fixed") { Fixed(it.getString("id"), it.getString("name"), it.getLong("amt"), it.getInt("day"), it.getString("cat")) },
+            fixed = arr("fixed") {
+                Fixed(it.getString("id"), it.getString("name"), it.getLong("amt"), it.getInt("day"), it.getString("cat"),
+                    it.optString("since", YearMonth.now().toString()), it.optString("done", ""))
+            },
             settings = Settings(
                 s.optLong("startSaved", def.startSaved), s.optLong("goal", def.goal), s.optString("goalYm", def.goalYm),
                 s.optLong("monthly", def.monthly), s.optLong("budget", def.budget),
@@ -186,16 +240,28 @@ object Calc {
 
     fun month(d: AppData, ym: String): MonthSum {
         val names = saveNames(d)
-        var inc = 0L; var out = 0L; var save = 0L
+        var inc = 0L; var out = 0L; var save = 0L; var fixedOut = 0L
         val by = LinkedHashMap<String, Long>()
         d.entries.filter { it.d.startsWith(ym) }.forEach { e ->
             when {
                 e.t == IN -> inc += e.amt
                 isSave(e, names) -> save += e.amt
-                else -> { out += e.amt; by[e.cat] = (by[e.cat] ?: 0) + e.amt }
+                else -> {
+                    out += e.amt
+                    if (e.fid != null) fixedOut += e.amt
+                    by[e.cat] = (by[e.cat] ?: 0) + e.amt
+                }
             }
         }
-        return MonthSum(inc, out, save, by.entries.map { it.key to it.value }.sortedByDescending { it.second })
+        return MonthSum(inc, out, save, by.entries.map { it.key to it.value }.sortedByDescending { it.second }, fixedOut)
+    }
+
+    /** Short amount for tight spots like calendar cells: 8,900 / 1.2만 / 35만 / 1.1억. */
+    fun short(n: Long): String = when {
+        n >= 100_000_000 -> "%.1f억".format(n / 100_000_000.0).replace(".0억", "억")
+        n >= 1_000_000 -> "${n / 10_000}만"
+        n >= 10_000 -> "%.1f만".format(n / 10_000.0).replace(".0만", "만")
+        else -> fmt(n)
     }
 
     fun totalSaved(d: AppData): Long {

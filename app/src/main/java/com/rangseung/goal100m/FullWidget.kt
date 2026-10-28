@@ -21,6 +21,7 @@ class FullWidget : AppWidgetProvider() {
 
     override fun onUpdate(ctx: Context, mgr: AppWidgetManager, ids: IntArray) {
         Store.load(ctx)
+        Store.syncFixed(ctx)
         render(ctx)
     }
 
@@ -161,10 +162,6 @@ class FullWidget : AppWidgetProvider() {
                     w.s("fsel")?.let { Store.deleteFixed(ctx, it) }
                     w.put("fsel" to null, "fconf" to false, "msg" to "고정 지출 삭제했어")
                 }
-                "fapply" -> {
-                    val n = Store.applyFixed(ctx, Calc.curYm())
-                    w.put("msg" to if (n > 0) "고정 지출 ${n}건 기록했어" else "이번 달은 다 기록돼 있어")
-                }
             }
         }
 
@@ -238,12 +235,12 @@ class FullWidget : AppWidgetProvider() {
             v.setTextViewText(
                 R.id.hRemain,
                 when {
-                    bud <= 0 -> "이번 달 지출 ${Calc.fmt(month.out)}원"
-                    month.out <= bud -> "생활비 ${Calc.fmt(bud - month.out)}원 남음"
-                    else -> "생활비 ${Calc.fmt(month.out - bud)}원 초과"
+                    bud <= 0 -> "이번 달 생활비 ${Calc.fmt(month.living)}원"
+                    month.living <= bud -> "생활비 ${Calc.fmt(bud - month.living)}원 남음"
+                    else -> "생활비 ${Calc.fmt(month.living - bud)}원 초과"
                 },
             )
-            v.setTextColor(R.id.hRemain, if (bud > 0 && month.out > bud) C_OUT else WHITE)
+            v.setTextColor(R.id.hRemain, if (bud > 0 && month.living > bud) C_OUT else WHITE)
             val saved = Calc.totalSaved(d)
             val pct = if (d.settings.goal > 0) (saved.toDouble() / d.settings.goal).coerceIn(0.0, 1.0) else 0.0
             v.setTextViewText(R.id.hGoal, "${Calc.man(d.settings.goal).removeSuffix("원")} · ${"%.1f".format(pct * 100)}%")
@@ -388,18 +385,16 @@ class FullWidget : AppWidgetProvider() {
         }
 
         private fun buildFixed(ctx: Context, v: RemoteViews, w: WS, d: AppData) {
-            val ym = Calc.curYm()
             val list = d.fixed.sortedBy { it.day }
             v.setTextViewText(R.id.fTotal, if (list.isEmpty()) "고정 지출" else "매달 ${Calc.fmt(list.sumOf { it.amt })}원")
             v.setOnClickPendingIntent(R.id.fAdd, popup(ctx, 803, WidgetEditActivity.FIXED))
 
             val sel = w.s("fsel")?.takeIf { s -> list.any { it.id == s } }
             v.setRemoteAdapter(R.id.fList, items(list.map { f ->
-                val done = Calc.fixedDone(d, f.id, ym)
                 f.id.hashCode().toLong() to row(
                     ctx, f.name,
-                    sub = "매달 ${f.day}일 · ${f.cat} · ${if (done) "이번 달 기록됨" else "미기록"}",
-                    right = "${Calc.fmt(f.amt)}원", rightColor = if (done) C_ACC else WHITE,
+                    sub = "매달 ${f.day}일 · ${f.cat} · 자동 기록",
+                    right = "${Calc.fmt(f.amt)}원", rightColor = WHITE,
                     selected = f.id == sel, op = "fsel", arg = f.id,
                 )
             }))
@@ -408,18 +403,12 @@ class FullWidget : AppWidgetProvider() {
             v.setOnClickPendingIntent(R.id.fEmpty, popup(ctx, 803, WidgetEditActivity.FIXED))
 
             v.setViewVisibility(R.id.fBar, if (sel != null) View.VISIBLE else View.GONE)
-            v.setViewVisibility(R.id.fApply, if (sel != null) View.GONE else View.VISIBLE)
             if (sel != null) {
                 v.setOnClickPendingIntent(R.id.fCancel, bcast(ctx, "fcancel"))
                 v.setOnClickPendingIntent(R.id.fEdit, popup(ctx, 804, WidgetEditActivity.FIXED, name = sel))
                 v.setTextViewText(R.id.fDel, if (w.b("fconf")) "정말 삭제?" else "삭제")
                 v.setOnClickPendingIntent(R.id.fDel, bcast(ctx, "fdel"))
             }
-            val pending = list.count { !Calc.fixedDone(d, it.id, ym) }
-            v.setTextViewText(R.id.fApply, if (pending > 0) "${YearMonth.now().monthValue}월 고정 지출 ${pending}건 기록" else "이번 달 고정 지출 기록 완료")
-            v.setInt(R.id.fApply, "setBackgroundResource", if (pending > 0) R.drawable.wf_accent else R.drawable.wf_off)
-            v.setTextColor(R.id.fApply, if (pending > 0) DARK else MUTED)
-            v.setOnClickPendingIntent(R.id.fApply, bcast(ctx, "fapply"))
         }
     }
 }
