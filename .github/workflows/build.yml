@@ -24,7 +24,17 @@ jobs:
           gradle-version: '8.9'
 
       - name: Build
-        run: gradle :app:assembleRelease --no-daemon --stacktrace
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle :app:assembleRelease --no-daemon 2>&1 | tee build.log
+
+      - name: Show build errors
+        if: failure()
+        shell: bash
+        run: |
+          grep -E '^e: |error:|ERROR:|What went wrong' -A3 build.log | head -60 > errs.txt || true
+          while IFS= read -r line; do echo "::error::$line"; done < <(head -40 errs.txt)
 
       - name: Publish to the "latest" release
         env:
