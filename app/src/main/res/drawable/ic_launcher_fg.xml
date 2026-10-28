@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Three rising bars and a goal line: savings climbing toward the target. Safe zone is the middle 66dp of 108dp. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#FFFFFFFF" android:pathData="M34,62h10a2,2 0,0 1,2 2v12h-14v-12a2,2 0,0 1,2 -2z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M49,52h10a2,2 0,0 1,2 2v22h-14v-22a2,2 0,0 1,2 -2z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M64,40h10a2,2 0,0 1,2 2v34h-14v-34a2,2 0,0 1,2 -2z" />
+    <path android:fillColor="#FFA7E3CF" android:pathData="M32,32h44v3h-44z" />
+</vector>
